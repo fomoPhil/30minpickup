@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Upload, MapPin, Loader2, Map, Navigation } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
 interface PickupFormProps {
   isOpen: boolean;
@@ -30,6 +31,7 @@ export default function PickupForm({ isOpen, onClose }: PickupFormProps) {
   const [image, setImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [description, setDescription] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [location, setLocation] = useState<LocationState>({
     latitude: null,
     longitude: null,
@@ -255,22 +257,93 @@ export default function PickupForm({ isOpen, onClose }: PickupFormProps) {
     }
   };
 
-  const handleSubmit = () => {
-    // Mock submission
-    console.log('Pickup submitted:', {
-      image,
-      description,
-      latitude: location.latitude,
-      longitude: location.longitude
-    });
+  const handleSubmit = async () => {
+    // Check if image is selected
+    if (!image) {
+      alert('Please select an image before submitting.');
+      return;
+    }
 
-    alert('Pickup submitted for review!');
+    // Check if location is available
+    if (!location.latitude || !location.longitude) {
+      alert('Please provide a location before submitting.');
+      return;
+    }
 
-    // Reset form
-    setImage(null);
-    setImagePreview(null);
-    setDescription('');
-    onClose();
+    setIsSubmitting(true);
+
+    try {
+      if (!supabase) {
+        throw new Error('Supabase client not available. Please check your environment configuration.');
+      }
+
+      // Create unique filename with sanitized original name
+      const timestamp = Date.now();
+      const sanitizedName = image.name
+        .replace(/[^a-zA-Z0-9.-]/g, '_') // Replace special chars with underscore
+        .replace(/_{2,}/g, '_') // Replace multiple underscores with single
+        .replace(/^_|_$/g, ''); // Remove leading/trailing underscores
+      const fileName = `${timestamp}_${sanitizedName}`;
+      const filePath = `pickups/${fileName}`;
+
+      // Upload image to storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('pickup-photos')
+        .upload(filePath, image);
+
+      if (uploadError) {
+        throw new Error(`Upload failed: ${uploadError.message}`);
+      }
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('pickup-photos')
+        .getPublicUrl(filePath);
+
+      const photoUrl = urlData.publicUrl;
+
+      // Insert into pickups table
+      const { error: insertError } = await supabase
+        .from('pickups')
+        .insert({
+          description,
+          latitude: location.latitude!,
+          longitude: location.longitude!,
+          photo_url: photoUrl,
+          status: 'pending'
+        } as any);
+
+      if (insertError) {
+        throw new Error(`Database insert failed: ${insertError.message}`);
+      }
+
+      // Success
+      alert('Pickup submitted successfully! It will be reviewed before appearing on the map.');
+
+      // Reset form
+      setImage(null);
+      setImagePreview(null);
+      setDescription('');
+      setLocation({
+        latitude: null,
+        longitude: null,
+        status: 'loading',
+        message: 'Acquiring location...'
+      });
+      setLocationMode('gps');
+      setManualLocation('');
+      setSelectedLocation(null);
+      setSuggestions([]);
+      setShowSuggestions(false);
+
+      onClose();
+
+    } catch (error) {
+      console.error('Submission error:', error);
+      alert(`Failed to submit pickup: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleClose = () => {
@@ -470,10 +543,17 @@ export default function PickupForm({ isOpen, onClose }: PickupFormProps) {
         {/* Submit Button */}
         <button
           onClick={handleSubmit}
-          disabled={location.status === 'loading' || location.status === 'error'}
-          className="w-full bg-green-500 hover:bg-green-600 disabled:bg-gray-600 disabled:cursor-not-allowed py-3 rounded-lg font-medium transition-colors"
+          disabled={isSubmitting || location.status === 'loading' || location.status === 'error' || !image}
+          className="w-full bg-green-500 hover:bg-green-600 disabled:bg-gray-600 disabled:cursor-not-allowed py-3 rounded-lg font-medium transition-colors flex items-center justify-center space-x-2"
         >
-          Submit Pickup
+          {isSubmitting ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>Uploading...</span>
+            </>
+          ) : (
+            <span>Submit Pickup</span>
+          )}
         </button>
       </div>
     </div>
