@@ -51,8 +51,8 @@ export default function AdminDashboard() {
 
     try {
       const { error } = await (supabase
-        .from('pickups')
-        .update({ status }) as any)
+        .from('pickups') as any)
+        .update({ status })
         .eq('id', id);
 
       if (error) throw error;
