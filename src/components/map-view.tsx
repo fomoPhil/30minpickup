@@ -1,17 +1,19 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { supabase } from '@/lib/supabase';
 
-// Dummy pickups: 5 locations (lat, lng)
-const DUMMY_PICKUPS = [
-  [40.7128, -74.0060], // New York
-  [34.0522, -118.2437], // LA
-  [41.8781, -87.6298], // Chicago
-  [29.7604, -95.3698], // Houston
-  [33.4484, -112.0740], // Phoenix
-];
+interface Pickup {
+  id: string;
+  latitude: number;
+  longitude: number;
+  description: string;
+  photo_url: string;
+  status: string;
+}
 
 // Custom icon
 const customIcon = L.divIcon({
@@ -22,13 +24,42 @@ const customIcon = L.divIcon({
 });
 
 export default function MapView() {
+  const [pickups, setPickups] = useState<Pickup[]>([]);
+
+  useEffect(() => {
+    const fetchApprovedPickups = async () => {
+      if (!supabase) {
+        console.error('Supabase client not available');
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('pickups')
+          .select('*')
+          .eq('status', 'approved');
+
+        if (error) throw error;
+        setPickups(data || []);
+      } catch (error) {
+        console.error('Error fetching pickups:', error);
+      }
+    };
+
+    fetchApprovedPickups();
+  }, []);
+
   return (
     <MapContainer center={[39.8283, -98.5795]} zoom={4} style={{ height: '100vh', width: '100vw' }}>
       <TileLayer
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
-      {DUMMY_PICKUPS.map((pos, index) => (
-        <Marker key={index} position={pos as [number, number]} icon={customIcon} />
+      {pickups.map((pickup) => (
+        <Marker
+          key={pickup.id}
+          position={[pickup.latitude, pickup.longitude] as [number, number]}
+          icon={customIcon}
+        />
       ))}
     </MapContainer>
   );
